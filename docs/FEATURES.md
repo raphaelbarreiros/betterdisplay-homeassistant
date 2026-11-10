@@ -42,12 +42,13 @@ Default families are basic controls, audio and informational sensors. Other fami
 ## Exact targeting and state rules
 
 - Device/entity identities are scoped to the HA config entry. Names and mutable host addresses are not unique identities. Duplicate endpoints are checked by normalized host/port; DNS aliases cannot be reliably deduplicated without a server identity.
-- System displays require tag and UUID evidence. Virtual/group definitions use type+tag; a stored UUID, if supplied, is checked, otherwise name changes are treated as ambiguity requiring rescan. An identity mismatch never selects another device.
-- Requests use the documented `type` + `tagID` selector. UUID comparison happens in discovery preflight rather than assuming the server ANDs several identity selectors.
+- System displays use normalized UUID identity independently of their volatile tag. Existing HA registry keys are preserved separately, including across rescans after tag changes. Virtual/group definitions retain type/tag identity with their existing UUID/name guards.
+- Physical-display requests use `type=Display` plus the canonical uppercase `UUID`; physical destination selectors use `targetUUID`. Virtual screens/groups still use typed tags. No request combines tag and UUID selectors or falls back to a different display.
 - Normalized reads explicitly request `value`, `min=0`, `max=1` and parse exactly three finite values. Returned bounds must be 0 and 1. Native scalar image-adjustment values are not assumed to be normalized.
 - Scope, family consent, selected identity and Pro entitlement are revalidated before a write. Select/input commands compare current wire mapping with the confirmed semantic mapping.
 - Setup, reload, event reception and ordinary idle time do not write controls. Startup/reload also make no BetterDisplay network requests.
 - State starts unknown but eligible controls remain actionable. Per-feature failures do not disable unrelated controls. Refresh remains available for recovery. No control claims that app readback is a physical measurement.
+- The physical **Connected** switch is a recovery exception: it remains actionable when absent or after a failed request, so HA does not silently skip a reconnect. A successful discovery that omits a saved display means disconnected, not unreachable-Mac. Reconnect sends one UUID-targeted write and performs bounded confirmation reads for up to five seconds; no write is retried.
 - An all-brightness preflight failure writes nothing. A write-time failure reports partial completion and stops; no retry or compensating write is sent. A verified value is not discarded merely because refreshing unrelated controls failed.
 - Generic HA device targets can operate multiple entities on a device. Use exact entity targets or the integration's typed brightness/device actions to avoid changing unintended controls.
 - No API can make the separate discovery/write requests atomic. BetterDisplay synchronization, associations and layout protection can intentionally propagate effects outside the selected snapshot.
@@ -61,6 +62,8 @@ These are not unfinished roadmap items: factory reset, virtual-screen create/dis
 Local verification uses real HA **2026.11.1** config/options flows, native entity/device actions and loopback HTTP fixtures. Development dependencies are pinned in `uv.lock`. The suite covers selection/isolation, manual-only requests, malformed responses, Pro expiry/unknown state, partial failure, list remapping, virtual/group identity, webhooks, diagnostics redaction and lifecycle recovery.
 
 Read-only CLI inspection of BetterDisplay **5.2.1 build 54014** confirmed actual comma-separated identifier objects, negative UUID-less Default Group IDs, normalized numeric triples, neutral image-adjustment conversion, mode/rate/profile/controller lists, true/on/off booleans and an ambient-light value. Committed fixtures are sanitized; local hardware identifiers and profile paths are not published.
+
+The 0.1.1 hotfix has regression coverage for disappearing displays, uppercase UUID selectors, delayed reconnect with changed tags, failed/expired-Pro requests that remain explicitly retryable, confirmation timeout without background work, and preservation of legacy entity/device IDs. Read-only UUID probes confirmed uppercase succeeds while lowercase fails on the installed BetterDisplay. Real physical reconnect writes remain unverified.
 
 **No physical display-changing commands were executed.** Input/preset variants, CEC behavior, real virtual associations, recovery after physical disconnection and licensed writes still depend on each device/controller. Unsupported or unrecognized responses are surfaced rather than guessed. Passing simulated tests is not hardware certification.
 

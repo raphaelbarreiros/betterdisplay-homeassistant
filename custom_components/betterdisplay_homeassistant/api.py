@@ -49,6 +49,7 @@ class Display:
     name: str
     product_name: str = ""
     device_type: str = "Display"
+    entity_key: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.tag_id, str) or not _TAG_ID.fullmatch(self.tag_id):
@@ -71,13 +72,42 @@ class Display:
         ):
             raise ValueError("Invalid display metadata")
         object.__setattr__(self, "uuid", self.uuid.lower())
+        if not isinstance(self.entity_key, str):
+            raise ValueError("Invalid saved entity key")
+        if self.entity_key:
+            if self.device_type == "Display":
+                saved_tag, separator, saved_uuid = self.entity_key.partition(":")
+                if not separator or not re.fullmatch(r"[1-9][0-9]*", saved_tag) or saved_uuid != self.uuid:
+                    raise ValueError("Saved entity key does not match the display UUID")
+            elif self.entity_key != f"{self.device_type}:{self.tag_id}":
+                raise ValueError("Saved entity key does not match the device")
 
     @property
     def key(self) -> str:
-        """Return a stable selection key, never derived from a display name."""
+        """HA registry key, retained across tag changes; not a wire selector."""
+        if self.entity_key:
+            return self.entity_key
         if self.device_type != "Display":
             return f"{self.device_type}:{self.tag_id}"
         return f"{self.tag_id}:{self.uuid}"
+
+    def resolve(self, devices: Mapping[str, Display]) -> Display | None:
+        """Find the same device, ignoring volatile system-display tag IDs."""
+        found = None
+        for candidate in devices.values():
+            if candidate.device_type != self.device_type:
+                continue
+            if self.device_type == "Display":
+                matches = candidate.uuid == self.uuid
+            else:
+                matches = candidate.tag_id == self.tag_id and (
+                    candidate.uuid == self.uuid if self.uuid else candidate.name == self.name
+                )
+            if matches:
+                if found is not None:
+                    return None
+                found = candidate
+        return found
 
     def to_dict(self) -> dict[str, str]:
         """Serialize the concrete selection snapshot for config entry options."""
@@ -87,6 +117,7 @@ class Display:
             "name": self.name,
             "product_name": self.product_name,
             "device_type": self.device_type,
+            "entity_key": self.key,
         }
 
     @classmethod
@@ -101,6 +132,7 @@ class Display:
                 name=data["name"],
                 product_name=data.get("product_name", ""),
                 device_type=data.get("device_type", "Display"),
+                entity_key=data.get("entity_key", ""),
             )
         except (KeyError, TypeError, ValueError):
             raise ValueError("Invalid display metadata") from None
@@ -282,8 +314,10 @@ class BetterDisplayClient:
     def _target(display: Display) -> dict[str, str]:
         if not isinstance(display, Display):
             raise ValueError("An explicit display identity is required")
-        # UUID is checked against discovery before writes. Do not assume the
-        # server ANDs multiple identity selectors; use its documented selector.
+        if display.device_type == "Display":
+            # BetterDisplay's UUID selector is case-sensitive. Its canonical
+            # UUIDs are uppercase, while internal comparisons are normalized.
+            return {"type": "Display", "UUID": display.uuid.upper()}
         return {"type": display.device_type, "tagID": display.tag_id}
 
     async def get_brightness(self, display: Display) -> float:
@@ -503,7 +537,7 @@ class BetterDisplayClient:
         self._definition(virtual, "associated")
         if not isinstance(other, Display) or other.device_type != "Display":
             raise ValueError("Association requires a physical display target")
-        text = await self._request("get", {**self._target(virtual), "associated": "", "targetTagID": other.tag_id})
+        text = await self._request("get", {**self._target(virtual), "associated": "", "targetUUID": other.uuid.upper()})
         return self._boolean(text)
 
     async def perform(self, target: Display | None, action: str, *, value: object = None, other: Display | None = None) -> None:
@@ -515,7 +549,7 @@ class BetterDisplayClient:
         if action in ("moveTo", "associated"):
             if not isinstance(other, Display) or other.device_type != "Display" or other.key == target.key:
                 raise ValueError("A different explicit physical target is required")
-            params["targetTagID"] = other.tag_id
+            params["targetUUID"] = other.uuid.upper()
         elif other is not None:
             raise ValueError("Unexpected secondary target")
         if action == "changeInputSource":

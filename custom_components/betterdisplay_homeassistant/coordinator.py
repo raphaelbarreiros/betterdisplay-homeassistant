@@ -14,7 +14,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .api import (
-    BetterDisplayClient, BetterDisplayError, Capability, Display, InvalidAuth,
+    BetterDisplayClient, BetterDisplayError, CannotConnect, Capability, Display, InvalidAuth,
     InvalidResponse, UnsupportedControl,
 )
 from .const import (
@@ -23,6 +23,8 @@ from .const import (
 from .features import CATALOG, family_for, pro_required
 
 _LOGGER = logging.getLogger(__name__)
+CONNECTION_CONFIRM_TIMEOUT = 5.0
+CONNECTION_CONFIRM_INTERVAL = 0.25
 _ACTION_FAMILIES = {
     "changeInputSource": "input", "muteToggle": "audio", "setMain": "layout",
     "favoriteMode": "layout", "moveTo": "layout", "associated": "virtual",
@@ -117,14 +119,95 @@ class BetterDisplayCoordinator(DataUpdateCoordinator[DisplayState]):
     def _publish(self, state: DisplayState) -> None:
         self.async_set_updated_data(state)
 
-    def _matches(self, key: str, discovered: dict[str, Display]) -> bool:
-        stored = self.displays[key]
-        current = discovered.get(key)
-        if current is None or current.device_type != stored.device_type:
+    def connection_control_available(self, key: str) -> bool:
+        """A recovery control must not be disabled by its last failed read."""
+        target = self.displays.get(key)
+        return (
+            target is not None and target.device_type == "Display"
+            and self.permits((key,)) and self.capability(key, "connected") is not None
+            and self._family_enabled(family_for("connected", target))
+        )
+
+    def _record_connection(self, key: str, value: bool | None, state: DisplayState) -> None:
+        state.values.setdefault(key, {})["connected"] = value
+        if value is None:
+            state.feature_unavailable.add((key, "connected"))
+            return
+        state.last_read = dt_util.utcnow()
+        state.unavailable.discard(MAC_KEY)
+        state.feature_unavailable.discard((key, "connected"))
+        if value:
+            state.unavailable.discard(key)
+        else:
+            state.unavailable.add(key)
+
+    async def _observe_connection(
+        self, target: Display, discovered: dict[str, Display] | None = None,
+    ) -> bool | None:
+        if discovered is not None and target.resolve(discovered) is None:
             return False
-        # These definition types lack an OS UUID. A changed name is an ambiguity,
-        # not permission to bind a new definition to an existing automation.
-        return current.uuid == stored.uuid if stored.uuid else current.name == stored.name
+        try:
+            value = (await self.client.read_feature(target, "connected")).value
+        except UnsupportedControl:
+            value = None
+        if discovered is None:
+            discovered = await self.client.discover()
+        if target.resolve(discovered) is None:
+            return False
+        return value if isinstance(value, bool) else None
+
+    async def _async_set_connection(self, key: str, connected: bool) -> None:
+        """Address saved UUIDs even when discovery cannot list the display."""
+        if not isinstance(connected, bool):
+            raise HomeAssistantError("Connection state must be on or off")
+        async with self._request_lock:
+            state = self._copy_state()
+            try:
+                self._ensure_consent(key, "connected")
+                target = self.displays[key]
+                observed = await self._observe_connection(target)
+                self._record_connection(key, observed, state)
+                if observed is connected:
+                    self._publish(state)
+                    return
+                await self._check_pro("connected", target, state)
+                self._ensure_consent(key, "connected")
+                # Exactly one write. Confirmation reads never replay it.
+                await self.client.write_feature(target, "connected", connected)
+                async with asyncio.timeout(CONNECTION_CONFIRM_TIMEOUT):
+                    while True:
+                        self._ensure_consent(key, "connected")
+                        observed = await self._observe_connection(target)
+                        self._record_connection(key, observed, state)
+                        if observed is connected:
+                            self._publish(state)
+                            return
+                        await asyncio.sleep(CONNECTION_CONFIRM_INTERVAL)
+            except (BetterDisplayError, TimeoutError, ValueError, HomeAssistantError) as error:
+                if isinstance(error, (CannotConnect, InvalidAuth)):
+                    state.unavailable.add(MAC_KEY)
+                    self._record_connection(key, None, state)
+                elif isinstance(error, (BetterDisplayError, ValueError)):
+                    self._record_connection(key, None, state)
+                self._publish(state)
+                if isinstance(error, InvalidAuth):
+                    self.entry.async_start_reauth(self.hass)
+                if isinstance(error, HomeAssistantError):
+                    raise
+                if isinstance(error, TimeoutError):
+                    raise HomeAssistantError(
+                        "The connection change was not confirmed within five seconds. "
+                        "It may still complete. No write was retried; the connection "
+                        "switch remains available for an explicit recovery action."
+                    ) from None
+                raise HomeAssistantError(
+                    "The connection request failed or could not be verified. "
+                    "Check the Mac and token. No write was retried; the connection "
+                    "switch remains available for recovery."
+                ) from None
+
+    def _matches(self, key: str, discovered: dict[str, Display]) -> bool:
+        return self.displays[key].resolve(discovered) is not None
 
     def _check_target(self, key: str) -> Display | None:
         if self.stopped:
@@ -185,10 +268,23 @@ class BetterDisplayCoordinator(DataUpdateCoordinator[DisplayState]):
             if key != MAC_KEY:
                 if not self.permits((key,)) or not self._matches(key, discovered):
                     state.unavailable.add(key)
+                    if self.connection_control_available(key):
+                        self._record_connection(key, False, state)
                     continue
                 state.unavailable.discard(key)
             target = self.displays.get(key)
+            physical_connection = (
+                target is not None and target.device_type == "Display"
+                and self.connection_control_available(key)
+            )
+            if physical_connection:
+                observed = await self._observe_connection(target, discovered)
+                self._record_connection(key, observed, state)
+                if observed is False:
+                    continue
             for feature in features:
+                if physical_connection and feature == "connected":
+                    continue
                 spec = CATALOG.get(feature)
                 if spec is None or not self._family_enabled(family_for(feature, target)):
                     continue
@@ -254,6 +350,9 @@ class BetterDisplayCoordinator(DataUpdateCoordinator[DisplayState]):
 
     async def async_set_feature(self, key: str, feature: str, value: object) -> None:
         self._ensure_consent(key, feature)
+        if feature == "connected" and self.displays.get(key) is not None and self.displays[key].device_type == "Display":
+            await self._async_set_connection(key, value)
+            return
         spec = CATALOG[feature]
         if spec.platform not in ("number", "switch", "select"):
             raise HomeAssistantError("This control is not a writable value")

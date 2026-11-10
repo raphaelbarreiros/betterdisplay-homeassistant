@@ -1,6 +1,7 @@
 """Explicit, manually scanned BetterDisplay configuration."""
 
 from collections.abc import Mapping
+from dataclasses import replace
 import secrets
 from typing import Any
 
@@ -13,13 +14,13 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 from homeassistant.helpers.selector import SelectSelector, TextSelector
 
-from .api import BetterDisplayClient, BetterDisplayError, CannotConnect, Display, InvalidAuth, InvalidResponse, Probe
+from .api import BetterDisplayClient, BetterDisplayError, CannotConnect, Capability, Display, InvalidAuth, InvalidResponse, Probe, UnsupportedControl
 from .const import (
     CONF_CAPABILITIES, CONF_DISPLAYS, CONF_FAMILIES, CONF_LABEL,
     CONF_SELECTION_MODE, CONF_TOKEN, CONF_WEBHOOKS, DEFAULT_FAMILIES,
     DEFAULT_PORT, DOMAIN, MAC_KEY, MODE_ALL, MODE_SELECTED, OPTIONAL_FAMILIES,
 )
-from .features import CATALOG, pro_required
+from .features import CATALOG, family_for, pro_required
 
 DISPLAY_IDS = "display_ids"
 MODE_MAC_ONLY = "mac_only"
@@ -120,18 +121,54 @@ def _selection(probe: Probe, data: Mapping[str, Any], families: list[str], previ
     return _snapshot(probe, keys, mode, families, mute, previous), None
 
 
+async def _probe_saved(client: BetterDisplayClient, families: list[str], previous: Mapping[str, Any] | None = None) -> Probe:
+    probe = await client.probe(families)
+    if previous is None or "connections" not in families:
+        return probe
+    for item in previous.get(CONF_DISPLAYS, []):
+        stored = Display.from_dict(item)
+        saved = previous.get(CONF_CAPABILITIES, {}).get(stored.key, {})
+        if stored.device_type != "Display" or stored.resolve(probe.displays) is not None or "connected" not in saved:
+            continue
+        try:
+            connected = await client.read_feature(stored, "connected")
+        except (UnsupportedControl, InvalidResponse):
+            continue
+        if connected.value is not False:
+            continue
+        # A UUID read verifies this configured-but-disconnected display. Keep
+        # its confirmed capabilities rather than deleting entities due to absence.
+        probe.displays[stored.key] = stored
+        probe.capabilities[stored.key] = {
+            feature: Capability.from_dict(capability)
+            for feature, capability in saved.items()
+            if feature in CATALOG and family_for(feature, stored) in families
+        }
+        probe.capabilities[stored.key]["connected"] = connected
+    return probe
+
+
 def _snapshot(probe: Probe, keys: list[str], mode: str, families: list[str], mute: list[str], previous: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    scopes = set(keys)
-    # Global layout actions also require a saved Mac capability scope.
+    previous_displays = [Display.from_dict(item) for item in (previous or {}).get(CONF_DISPLAYS, [])]
+    old_by_uuid = {display.uuid: display for display in previous_displays if display.device_type == "Display"}
+    selected: dict[str, Display] = {}
+    key_map: dict[str, str] = {}
+    for key in keys:
+        display = probe.displays[key]
+        old = old_by_uuid.get(display.uuid) if display.device_type == "Display" else None
+        if old is not None:
+            display = replace(display, entity_key=old.key)
+        selected[display.key] = display
+        key_map[key] = display.key
     if "mac" in families or "layout" in families:
-        scopes.add(MAC_KEY)
+        key_map[MAC_KEY] = MAC_KEY
     return {
         CONF_SELECTION_MODE: mode,
-        CONF_DISPLAYS: [probe.displays[key].to_dict() for key in keys],
+        CONF_DISPLAYS: [display.to_dict() for display in selected.values()],
         CONF_FAMILIES: families,
-        CONF_CAPABILITIES: {key: {feature: capability.to_dict() for feature, capability in capabilities.items()} for key, capabilities in probe.capabilities.items() if key in scopes},
-        CONF_WEBHOOKS: {key: secret for key, secret in (previous or {}).get(CONF_WEBHOOKS, {}).items() if key in keys and probe.displays[key].device_type == "Display"},
-        MUTE_TARGETS: mute,
+        CONF_CAPABILITIES: {key_map[key]: {feature: capability.to_dict() for feature, capability in capabilities.items()} for key, capabilities in probe.capabilities.items() if key in key_map},
+        CONF_WEBHOOKS: {key: secret for key, secret in (previous or {}).get(CONF_WEBHOOKS, {}).items() if key in selected and selected[key].device_type == "Display"},
+        MUTE_TARGETS: [key_map[key] for key in mute],
     }
 
 
@@ -152,14 +189,15 @@ def _control_label(feature: str, target: Display | None) -> str:
 
 def _confirmation(data: Mapping[str, Any], options: Mapping[str, Any], probe: Probe, previous: Mapping[str, Any] | None = None) -> dict[str, str]:
     displays = [Display.from_dict(item) for item in options[CONF_DISPLAYS]]
+    selected = {display.key: display for display in displays}
     before = {Display.from_dict(item).key for item in (previous or {}).get(CONF_DISPLAYS, [])}
     after = {display.key for display in displays}
     return {
         "mac": data[CONF_LABEL], "host": data[CONF_HOST],
         "displays": "\n".join(f"- {_label(display)}" for display in displays) or "Mac-only controls (no displays)",
         "families": ", ".join(options[CONF_FAMILIES]) or "None",
-        "controls": "\n".join(f"- {_label(probe.displays[key]) if key in probe.displays else 'Mac'}: {', '.join(_control_label(feature, probe.displays.get(key)) for feature in features)}" for key, features in options[CONF_CAPABILITIES].items()) or "No readable controls",
-        "mute_targets": ", ".join(probe.displays[key].name for key in options[MUTE_TARGETS]) or "None",
+        "controls": "\n".join(f"- {_label(selected[key]) if key in selected else 'Mac'}: {', '.join(_control_label(feature, selected.get(key)) for feature in features)}" for key, features in options[CONF_CAPABILITIES].items()) or "No readable controls",
+        "mute_targets": ", ".join(selected[key].name for key in options[MUTE_TARGETS]) or "None",
         "pro_status": {True: "available", False: "not available", None: "unknown"}[probe.pro_available],
         "skipped": str(len(probe.displays) - len(_eligible(probe, options[CONF_FAMILIES]))),
         "added": str(len(after - before)), "removed": str(len(before - after)),
@@ -194,20 +232,21 @@ class BetterDisplayConfigFlow(ConfigFlow, domain=DOMAIN):
             client = _client(self.hass, values)
             if self._duplicate(client):
                 return "already_configured"
-            probe = await client.probe(families)
+            probe = await _probe_saved(client, families, self._editing.options if self._editing else None)
         except (BetterDisplayError, ValueError) as exc:
             return _error(exc)
         if self._editing:
             old = self._editing.options
             displays = [Display.from_dict(item) for item in old[CONF_DISPLAYS]]
+            key_map = {}
             for display in displays:
-                found = probe.displays.get(display.key)
-                if (found is None or found.device_type != display.device_type
-                        or (found.uuid != display.uuid if display.uuid else found.name != display.name)):
+                found = display.resolve(probe.displays)
+                if found is None:
                     return "identity_mismatch"
+                key_map[display.key] = found.key
             if not displays and (old.get(CONF_SELECTION_MODE) != MODE_MAC_ONLY or "mac" not in families):
                 return "identity_mismatch"
-            self._options = _snapshot(probe, [display.key for display in displays], old[CONF_SELECTION_MODE], families, list(old.get(MUTE_TARGETS, [])), old)
+            self._options = _snapshot(probe, list(key_map.values()), old[CONF_SELECTION_MODE], families, [key_map[key] for key in old.get(MUTE_TARGETS, [])], old)
         elif not _eligible(probe, families) and not ("mac" in families and probe.capabilities.get(MAC_KEY)):
             return "no_displays"
         self._data = {CONF_HOST: client.host, CONF_PORT: client.port, CONF_LABEL: values[CONF_LABEL].strip(), CONF_TOKEN: values[CONF_TOKEN]}
@@ -291,7 +330,7 @@ class BetterDisplayOptionsFlow(OptionsFlowWithReload):
         if user_input is not None:
             try:
                 families = _families(user_input)
-                probe = await _client(self.hass, self.config_entry.data).probe(families)
+                probe = await _probe_saved(_client(self.hass, self.config_entry.data), families, self.config_entry.options)
             except (BetterDisplayError, ValueError) as exc:
                 errors["base"] = _error(exc)
             else:
@@ -311,10 +350,15 @@ class BetterDisplayOptionsFlow(OptionsFlowWithReload):
                 return await self.async_step_confirm()
             errors["base"] = error
         eligible = _eligible(self._probe, self._families)
+        current_keys = {
+            display.key: found.key
+            for item in self.config_entry.options[CONF_DISPLAYS]
+            if (found := (display := Display.from_dict(item)).resolve(eligible)) is not None
+        }
         suggested = user_input if user_input is not None else {
             CONF_SELECTION_MODE: self.config_entry.options[CONF_SELECTION_MODE],
-            DISPLAY_IDS: [display.key for item in self.config_entry.options[CONF_DISPLAYS] if (display := Display.from_dict(item)).key in eligible],
-            MUTE_TARGETS: [key for key in self.config_entry.options.get(MUTE_TARGETS, []) if key in eligible and "audio" in self._families],
+            DISPLAY_IDS: list(current_keys.values()),
+            MUTE_TARGETS: [current_keys[key] for key in self.config_entry.options.get(MUTE_TARGETS, []) if key in current_keys and "audio" in self._families],
         }
         return self.async_show_form(step_id="targets", data_schema=_targets_schema(self._probe, suggested, self._families), errors=errors, description_placeholders={"mac": self.config_entry.title})
 

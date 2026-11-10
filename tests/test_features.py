@@ -216,7 +216,7 @@ async def test_typed_service_cannot_broadcast_or_cross_macs(hass, mac_factory):
     assert not first.commands
     assert len(second.commands) == 1
     path, query = second.commands[0]
-    assert path == "/set" and query["favoriteMode"] == "2" and query["tagID"] == "2"
+    assert path == "/set" and query["favoriteMode"] == "2" and query["UUID"] == "UUID-TWO"
 
 
 async def test_mac_only_controls_are_explicit_and_have_no_display_target(hass, mac_factory):
@@ -251,7 +251,7 @@ async def test_input_uses_refreshed_controller_specific_choice_without_false_sta
     assert path == "/perform"
     assert command["changeInputSource"] == "3"
     assert command["specifier"] == "DDCController"
-    assert command["tagID"] == "1"
+    assert command["UUID"] == "UUID-ONE" and "tagID" not in command
     assert er.async_get(hass).async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_1:uuid-one_changeInputSource") is None
     mac.commands.clear()
     mac.lists["1"]["inputSourceList"] = "3 - DisplayPort [DDCController]"
@@ -272,7 +272,7 @@ async def test_cec_requires_controller_evidence_and_fixed_nonbroadcast_address(h
     await service(hass, "send_cec", device_id=device(hass, entry, "1:uuid-one"), command="standby")
     path, command = mac.commands[-1]
     assert path == "/perform" and command["sendCEC"] == "standby"
-    assert command["CECAddress"] == "tv" and command["tagID"] == "1"
+    assert command["CECAddress"] == "tv" and command["UUID"] == "UUID-ONE"
 
 
 async def test_global_layout_requires_explicit_confirmation_and_family(hass, mac_factory):
@@ -378,7 +378,7 @@ async def test_explicit_mute_toggle_opt_in_never_invents_mute_state(hass, mac_fa
     entry = result["result"]
     await service(hass, "toggle_mute", device_id=device(hass, entry, "1:uuid-one"))
     path, query = mac.commands[-1]
-    assert path == "/toggle" and query["mute"] == "" and query["tagID"] == "1"
+    assert path == "/toggle" and query["mute"] == "" and query["UUID"] == "UUID-ONE"
     assert er.async_get(hass).async_get_entity_id("switch", DOMAIN, f"{entry.entry_id}_1:uuid-one_mute") is None
 
 

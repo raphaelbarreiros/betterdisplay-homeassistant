@@ -4,7 +4,7 @@
 
 Repository: **[raphaelbarreiros/betterdisplay-homeassistant](https://github.com/raphaelbarreiros/betterdisplay-homeassistant)**  
 Integration domain: **`betterdisplay_homeassistant`**  
-Package version: **0.1.0**  
+Package version: **0.1.1**
 License: **[MIT](../LICENSE)**  
 Minimum Home Assistant: **2026.11.1**
 
@@ -42,6 +42,8 @@ The README also documents manual file installation. The domain is distinct from 
 Local tests instantiate real **HA 2026.11.1** and loopback simulated BetterDisplay endpoints. They exercise guided setup/options/reconfigure, multi-Mac identity isolation, per-feature and aggregate actions, typed device actions, Pro/consent checks, normalized triple responses, mapping changes, virtual/group handling, event ingress/opt-out, registry preservation and secret-safe diagnostics.
 
 Read-only local CLI checks used **BetterDisplay 5.2.1 build 54014**. They established actual response formats for system/group identifiers, normalized numeric values, modes, refresh rates, profiles/controllers and selected Boolean/sensor states. Real device identifiers/profile paths were not committed.
+
+The 0.1.1 reconnection hotfix passed 83 local regression tests. Read-only inspection additionally confirmed that BetterDisplay's physical-display UUID selector requires uppercase canonical UUIDs. Physical reconnect/disconnect writes were not run by the assistant. Upgrade and restart HA without deleting the existing integration: the hotfix preserves existing entity IDs and device customizations.
 
 **No physical setting-changing commands were executed.** Display-specific inputs, CEC, disconnection recovery, virtual associations and licensed writes remain subject to real hardware acceptance testing. A local Docker daemon was unavailable; Hassfest/HACS publication checks run in GitHub Actions instead. A successful packaging check is not a live Marketplace UI install or a physical-monitor test.
 

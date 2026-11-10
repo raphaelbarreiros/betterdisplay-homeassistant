@@ -2,7 +2,7 @@
 
 DOMAIN = "betterdisplay_homeassistant"
 NAME = "BetterDisplay for Home Assistant"
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 DEFAULT_PORT = 55777
 CONF_LABEL = "label"
 CONF_TOKEN = "token"

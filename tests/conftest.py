@@ -35,6 +35,45 @@ class Mac:
     pro: str | None = "off"
     port: int = 0
     invalidate_discovery_after_set: bool = False
+    simulate_connections: bool = False
+    missing_connection_readback: bool = True
+    disconnected: dict[str, dict] = field(default_factory=dict)
+    pending_reconnect: dict[str, int] = field(default_factory=dict)
+    reconnect_tags: dict[str, str] = field(default_factory=dict)
+    reconnect_delay_reads: int = 2
+    never_reconnect: bool = False
+
+    def by_uuid(self, wire_uuid):
+        if not isinstance(wire_uuid, str) or wire_uuid != wire_uuid.upper():
+            return None
+        return next((display for display in [*self.displays, *self.disconnected.values()]
+                     if display["deviceType"] == "Display"
+                     and display["UUID"].upper() == wire_uuid), None)
+
+    def disconnect(self, uuid):
+        display = self.by_uuid(uuid.upper())
+        self.displays = [item for item in self.displays if item is not display]
+        self.disconnected[uuid.lower()] = display
+        self.values.setdefault(str(display["tagID"]), {})["connected"] = "off"
+
+    def advance_reconnections(self):
+        for uuid, remaining in list(self.pending_reconnect.items()):
+            if self.never_reconnect:
+                continue
+            if remaining > 0:
+                self.pending_reconnect[uuid] = remaining - 1
+                continue
+            display = self.disconnected.pop(uuid)
+            old_tag = str(display["tagID"])
+            tag = self.reconnect_tags.get(uuid, old_tag)
+            display["tagID"] = tag
+            if tag != old_tag:
+                self.values[tag] = self.values.pop(old_tag, {})
+                if old_tag in self.brightness:
+                    self.brightness[tag] = self.brightness.pop(old_tag)
+            self.values.setdefault(tag, {})["connected"] = "on"
+            self.displays.append(display)
+            del self.pending_reconnect[uuid]
 
     @property
     def config(self):
@@ -46,25 +85,42 @@ class Mac:
         if query.get("token") != self.token:
             return web.Response(status=401)
         if request.path == "/get" and "identifiers" in query:
+            self.advance_reconnections()
             body = self.discovery_body
             if body is None:
                 body = ",".join(json.dumps(display) for display in self.displays)
             return web.Response(text=body)
         if request.path == "/get" and "proAvailable" in query:
             return web.Response(text=self.pro) if self.pro is not None else web.Response(status=404)
-        tag = query.get("tagID", "mac")
-        identity = next((d for d in self.displays if str(d["tagID"]) == tag), None)
-        if tag != "mac" and (identity is None or query.get("type") != identity["deviceType"] or "UUID" in query):
-            return web.Response(status=400, text="Explicit matching device identity required")
-        features = set(query) - {"token", "tagID", "type", "min", "max", "value", "targetTagID", "specifier", "CECAddress"}
+        if "UUID" in query:
+            identity = self.by_uuid(query["UUID"])
+            if identity is None:
+                return web.Response(status=404, text="Failed.")
+            if query.get("type") != "Display" or "tagID" in query:
+                return web.Response(status=400, text="One explicit uppercase UUID required")
+            tag = str(identity["tagID"])
+        else:
+            tag = query.get("tagID", "mac")
+            identity = next((d for d in self.displays if str(d["tagID"]) == tag), None)
+            if tag != "mac" and (identity is None or identity["deviceType"] == "Display" or query.get("type") != identity["deviceType"]):
+                return web.Response(status=400, text="Explicit matching device identity required")
+        other = self.by_uuid(query.get("targetUUID")) if "targetUUID" in query else None
+        if "targetUUID" in query and other is None:
+            return web.Response(status=404, text="Failed.")
+        target_tag = str(other["tagID"]) if other is not None else query.get("targetTagID")
+        features = set(query) - {"token", "tagID", "UUID", "type", "min", "max", "value", "targetTagID", "targetUUID", "specifier", "CECAddress"}
         if len(features) != 1:
             return web.Response(status=400, text="Exactly one feature required")
         feature = features.pop()
         if request.path == "/get":
+            if (feature == "connected" and identity is not None
+                    and identity.get("UUID", "").lower() in self.disconnected
+                    and self.missing_connection_readback):
+                return web.Response(status=404, text="Failed.")
             if (tag, feature) in self.fail_features:
                 return web.Response(status=404, text="Failed.")
             if feature == "associated":
-                value = self.associations.get((tag, query.get("targetTagID")))
+                value = self.associations.get((tag, target_tag))
             elif feature == "brightness":
                 value = self.brightness.get(tag)
             else:
@@ -88,9 +144,16 @@ class Mac:
             if feature == "brightness":
                 self.brightness[tag] = query[feature]
             elif feature == "associated":
-                self.associations[(tag, query.get("targetTagID"))] = query[feature]
+                self.associations[(tag, target_tag)] = query[feature]
             else:
                 self.values.setdefault(tag, {})[feature] = query[feature]
+            if feature == "connected" and self.simulate_connections and identity["deviceType"] == "Display":
+                uuid = identity["UUID"].lower()
+                if query[feature] == "off":
+                    self.disconnect(uuid)
+                elif uuid in self.disconnected:
+                    self.values[tag]["connected"] = "off"
+                    self.pending_reconnect[uuid] = self.reconnect_delay_reads
             if self.invalidate_discovery_after_set:
                 self.discovery_body = "invalid discovery response"
         return web.Response(text="")

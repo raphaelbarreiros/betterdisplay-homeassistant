@@ -92,6 +92,16 @@ Before writes, the integration checks the current target identity and consent. P
 
 **Limits:** discovery and a subsequent write are not atomic. BetterDisplay can propagate changes through synchronization, associations or layout protection outside the selected targets. HTTP acceptance is not a physical acknowledgement; app readback is not a panel measurement. A timeout does not undo an accepted request.
 
+### Connection recovery (0.1.1)
+
+System displays are addressed by uppercase UUID, not their volatile tag. Existing HA entity/device IDs are preserved when a tag changes, including on a later confirmed rescan.
+
+The **Connected** switch stays actionable as a recovery control even when the display is absent or its last request failed. If the Mac cannot be reached, state is unknown and an explicit action reports an error instead of being silently skipped by HA.
+
+Turning off accepts an `off` readback or confirmed absence from a successful device-list response. Turning on sends one UUID-targeted write and waits up to five seconds for the same UUID to be visible and report connected. Only those confirmation reads repeat; writes are never replayed and no idle polling is introduced. Other controls remain unavailable while a display is disconnected.
+
+After upgrading, restart HA; do not delete/re-add the integration or rename your existing switch entities. Confirm the returning display is on before disconnecting your recovery display. Existing HA scripts and disabled fallback scripts are not modified by this update.
+
 ### Typed actions
 
 Find these under **BetterDisplay for Home Assistant** in HA's action picker:
