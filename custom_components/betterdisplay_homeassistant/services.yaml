@@ -1,0 +1,185 @@
+set_brightness:
+  name: Set display brightness
+  description: Change only brightness on the selected display, never its volume or other numeric controls.
+  fields:
+    device_id:
+      name: Display
+      required: true
+      selector:
+        device:
+          integration: betterdisplay_homeassistant
+    value:
+      name: Brightness
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+set_all_brightness:
+  name: Set all selected displays brightness
+  description: Change brightness on this computer's confirmed brightness-capable display snapshot using explicit individual requests. This never targets other computers or automatically includes new displays.
+  fields:
+    config_entry_id:
+      name: Computer
+      required: true
+      selector:
+        config_entry:
+          integration: betterdisplay_homeassistant
+    value:
+      name: Brightness
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+move_display:
+  name: Move display
+  description: Move one selected display relative to another on the same Mac. Requires layout consent and Pro. Existing layout protection can affect other displays.
+  fields:
+    device_id:
+      name: Display to move
+      required: true
+      selector:
+        device:
+          integration: betterdisplay_homeassistant
+    target_device_id:
+      name: Reference display
+      required: true
+      selector:
+        device:
+          integration: betterdisplay_homeassistant
+    position:
+      name: Relative position
+      required: true
+      selector:
+        select:
+          options:
+            - topLeftCorner
+            - topLeft
+            - top
+            - topRight
+            - topRightCorner
+            - leftTop
+            - left
+            - leftBottom
+            - rightTop
+            - right
+            - rightBottom
+            - bottomLeftCorner
+            - bottomLeft
+            - bottom
+            - bottomRight
+            - bottomRightCorner
+set_virtual_screen_association:
+  name: Set virtual-screen association
+  description: Change one existing virtual screen's association to a selected display on the same Mac. Requires virtual-screen consent and Pro; saved association rules can connect, mirror or stream screens.
+  fields:
+    device_id:
+      name: Virtual screen
+      required: true
+      selector:
+        device:
+          integration: betterdisplay_homeassistant
+    target_device_id:
+      name: Associated display
+      required: true
+      selector:
+        device:
+          integration: betterdisplay_homeassistant
+    associated:
+      name: Associated
+      required: true
+      selector:
+        boolean:
+apply_favorite_mode:
+  name: Apply favorite display mode
+  description: Apply an existing favorite slot on a selected display. Requires layout consent and Pro. Empty or incompatible slots can fail; this does not save or overwrite slots.
+  fields:
+    device_id:
+      name: Display
+      required: true
+      selector:
+        device:
+          integration: betterdisplay_homeassistant
+    slot:
+      name: Favorite slot
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 5
+          step: 1
+          mode: box
+switch_input:
+  name: Switch input
+  description: Send one confirmed input command. Prefer the display's generated input buttons. The choice is the exact wire choice from the last confirmed scan, not a guessed HDMI number. No active-input state is implied.
+  fields:
+    device_id:
+      name: Display
+      required: true
+      selector:
+        device:
+          integration: betterdisplay_homeassistant
+    choice:
+      name: Confirmed input choice
+      required: true
+      selector:
+        text:
+send_cec:
+  name: Send CEC command
+  description: Send a supported TV CEC command on a selected display with a configured CEC controller. Requires CEC consent. Dispatch does not prove a physical response; keep the remote available.
+  fields:
+    device_id:
+      name: Display
+      required: true
+      selector:
+        device:
+          integration: betterdisplay_homeassistant
+    command:
+      name: Command
+      required: true
+      selector:
+        select:
+          options:
+            - volumeUp
+            - volumeDown
+            - mute
+            - standby
+            - wake
+            - input
+            - select
+            - up
+            - down
+            - left
+            - right
+            - rootMenu
+            - setupMenu
+            - contentsMenu
+            - exit
+toggle_mute:
+  name: Toggle mute without state
+  description: Toggle a controller that cannot report mute state. Requires explicit toggle-only mute enrollment for this display; failed reads do not automatically enable it.
+  fields:
+    device_id:
+      name: Display
+      required: true
+      selector:
+        device:
+          integration: betterdisplay_homeassistant
+apply_layout_protection:
+  name: Apply all active group layout protections
+  description: Mac-wide action. Requires layout consent and Pro. This can move unselected displays and change the main display; individual display selectors cannot constrain it.
+  fields:
+    config_entry_id:
+      name: Computer
+      required: true
+      selector:
+        config_entry:
+          integration: betterdisplay_homeassistant
+    confirm_global:
+      name: Confirm Mac-wide scope
+      required: true
+      selector:
+        boolean:

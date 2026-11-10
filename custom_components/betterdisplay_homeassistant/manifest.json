@@ -1,0 +1,13 @@
+{
+  "domain": "betterdisplay_homeassistant",
+  "name": "BetterDisplay for Home Assistant",
+  "codeowners": ["@raphaelbarreiros"],
+  "config_flow": true,
+  "dependencies": ["webhook"],
+  "documentation": "https://github.com/raphaelbarreiros/betterdisplay-homeassistant",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/raphaelbarreiros/betterdisplay-homeassistant/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

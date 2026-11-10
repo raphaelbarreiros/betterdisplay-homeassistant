@@ -1,0 +1,104 @@
+{
+  "title": "BetterDisplay for Home Assistant",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect a Mac",
+        "description": "Enable BetterDisplay's HTTP server on this Mac and enter its authentication token. Use a trusted local network only: HTTP does not encrypt the token. Do not expose the server to the internet. Add a separate entry for each Mac. Choose feature families before this manual, read-only scan; nothing is changed on the Mac. API availability and commercial use depend on your BetterDisplay version and license; a readable control does not establish license entitlement.",
+        "data": {"label": "Mac name", "host": "Hostname or IP address", "port": "HTTP server port", "token": "Authentication token", "families": "Feature families"},
+        "data_description": {"label": "A recognizable name for this computer.", "host": "Bare hostname or IP address; no scheme, path, or port.", "port": "The port configured in BetterDisplay's HTTP server settings.", "token": "The HTTP server token, not an Apple or Home Assistant password.", "families": "Only these families are scanned and authorized. Advanced controls may black out screens, change audio, disconnect displays, or affect other displays through BetterDisplay synchronization."}
+      },
+      "targets": {
+        "title": "Choose targets for {mac}",
+        "description": "All system displays includes only supported Display records from this scan, never virtual screens or groups. Individual targets can include VirtualScreen or DisplayGroup records only with their feature family enabled. Mac-only explicitly selects no displays and requires the Mac family. Future targets are never enrolled automatically. Failed mute reads do not imply toggle support; enable manual mute toggle only for displays whose toggle behavior you have verified.",
+        "data": {"selection_mode": "Control scope", "display_ids": "Individual targets", "mute_toggle_targets": "Explicit manual mute-toggle targets"},
+        "data_description": {"selection_mode": "Choose a fixed snapshot on this Mac. An empty individual selection never means all.", "display_ids": "Used only for Individual targets; review device type and tag before selecting advanced targets.", "mute_toggle_targets": "Optional selected system displays with independently verified toggle support. This is a stateless action with no claimed mute state, not a fallback for a failed read."}
+      },
+      "confirm": {
+        "title": "Confirm scope for {mac}",
+        "description": "Mac: {mac} ({host})\n\nSelected targets:\n{displays}\n\nFamilies: {families}\n\nObserved capabilities:\n{controls}\n\nExplicit manual mute-toggle targets: {mute_targets}\n\nBetterDisplay Pro: {pro_status}. Unsupported or excluded targets: {skipped}. Pro writes require a fresh positive license check; unknown status never authorizes them. Readability is not a license guarantee. Business use is subject to BetterDisplay's license terms.\n\nThis saves a fixed snapshot with no background polling or startup network requests. Refresh display states reads known controls; Configure allows an explicit rescan. Advanced or risky entities remain disabled by default and must be enabled separately. Brightness zero, power, input, HDR, modes, connection and layout actions can make a display unreadable or unavailable. Synchronization, groups and global Mac actions may affect displays outside this selection; review BetterDisplay settings first. Values represent app state, not physical acknowledgement. Confirmation saves controls without writing to the Mac. Event webhooks are a separate opt-in in Configure."
+      },
+      "reconfigure": {
+        "title": "Reconnect {mac}",
+        "description": "A manual read-only scan must find every saved target identity. UUID-less groups and virtual screens must also retain their name. Families and selected scope are preserved, even for All displays; nothing new is enrolled. Use Configure to intentionally rescan and change scope. Mac-only entries retain their explicit global scope. Do not use this to replace one computer with another.",
+        "data": {"label": "Mac name", "host": "Hostname or IP address", "port": "HTTP server port", "token": "Authentication token"},
+        "data_description": {"label": "A recognizable name for the same computer.", "host": "The same Mac's bare hostname or IP address.", "port": "BetterDisplay's HTTP server port.", "token": "Re-enter the HTTP token. It is never prefilled or shown."}
+      },
+      "reauth_confirm": {
+        "title": "Authenticate {mac}",
+        "description": "Enter the new BetterDisplay HTTP token. One manual read-only scan verifies the saved identities and refreshes capabilities without expanding targets or feature families.",
+        "data": {"token": "Authentication token"},
+        "data_description": {"token": "The replacement HTTP server token for this same Mac."}
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach BetterDisplay. Check the Mac, HTTP server, hostname, port and firewall, then retry.",
+      "invalid_auth": "BetterDisplay rejected the token. Check server authentication settings.",
+      "invalid_input": "Enter a nonempty Mac name and token, a bare hostname or IP address, valid port and known feature families.",
+      "invalid_response": "BetterDisplay returned an invalid or ambiguous response. Check the app version and server settings.",
+      "unsupported_control": "The requested discovery or control is unsupported. Check BetterDisplay's version and HTTP server.",
+      "already_configured": "This hostname and port are already configured in another entry.",
+      "selection_required": "Explicitly choose All system displays, Individual targets or Mac-only.",
+      "no_selection": "Select at least one supported target. Empty never means all; use explicit Mac-only for global controls.",
+      "invalid_selection": "Choose each target only once from the eligible list on this Mac.",
+      "invalid_mute_selection": "Manual mute-toggle targets must be selected system displays with the Audio family enabled.",
+      "mac_family_required": "Enable the Mac feature family before choosing Mac-only."
+    },
+    "abort": {
+      "already_configured": "This hostname and port are already configured in another entry.",
+      "identity_mismatch": "The scan did not find every saved identity. UUID-less targets must retain their saved name. Nothing changed. Restore the original targets or use Configure to explicitly change this Mac's selection; add a separate entry for another Mac."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure this Mac",
+        "description": "Choose a manual rescan or manage event webhooks independently. Opening this menu makes no network request.",
+        "menu_options": {"rescan": "Rescan targets and feature families", "events": "Manage local event webhooks"}
+      },
+      "rescan": {
+        "title": "Rescan {mac}",
+        "description": "Submitting performs one read-only scan of the chosen families. Existing targets, capabilities and consent remain unchanged until final confirmation. This is not a write to the Mac. Pro availability and hardware support determine which capabilities can be read. Removing families removes their controls and can break automations.",
+        "data": {"families": "Feature families"},
+        "data_description": {"families": "Explicit authorization to discover these families. Advanced controls may black out screens, change audio, disconnect displays or affect other targets."}
+      },
+      "targets": {
+        "title": "Choose new scope for {mac}",
+        "description": "All system displays replaces the snapshot with supported Display records found now, never virtual screens or groups. Pick advanced targets individually with the corresponding family enabled. Mac-only requires the Mac family. Targets absent from this snapshot will be removed after confirmation. Manual mute toggle requires explicit knowledge of support; failed reads do not establish support.",
+        "data": {"selection_mode": "Control scope", "display_ids": "Individual targets", "mute_toggle_targets": "Explicit manual mute-toggle targets"},
+        "data_description": {"selection_mode": "A new fixed snapshot; future targets are not added automatically.", "display_ids": "Used only for Individual targets. Review device types and tags.", "mute_toggle_targets": "Selected system displays whose stateless mute toggle you have independently verified. No mute state is inferred."}
+      },
+      "confirm": {
+        "title": "Confirm new scope for {mac}",
+        "description": "Mac: {mac} ({host})\n\nTargets:\n{displays}\n\nFamilies: {families}\n\nObserved capabilities:\n{controls}\n\nExplicit manual mute-toggle targets: {mute_targets}\n\nAdded targets: {added}. Removed: {removed}. Removal can break automations; removed displays also lose their event webhooks. BetterDisplay Pro: {pro_status}. Unsupported or excluded targets: {skipped}. Pro writes require fresh positive license status; readability is not a license guarantee. Business use remains subject to BetterDisplay's terms.\n\nNo background polling runs. Manual Refresh reads only known controls and never enrolls targets. Risky entities stay disabled by default until enabled separately. Brightness zero, power, input, HDR, modes, connection and layout actions may make screens unusable. Synchronization, groups and global actions can affect other displays; check BetterDisplay settings. State is app-reported, not physical acknowledgement. Saving reloads controls without writing to the Mac."
+      },
+      "events": {
+        "title": "Event webhooks for {mac}",
+        "description": "Select saved system displays to receive BetterDisplay event callbacks. No rescan or outbound request occurs. Each display gets a separate random secret URL; retained selections keep their existing secret. Deselecting disables and removes that URL. Webhooks accept only local GET callbacks, never trigger state reads, and are not proof of a display's current state. Configure a Home Assistant internal URL reachable by the Mac first.",
+        "data": {"display_ids": "Enable events for these displays"},
+        "data_description": {"display_ids": "Empty disables all event webhooks for this Mac. Only already-selected system displays are eligible."}
+      },
+      "events_confirm": {
+        "title": "Save event webhook configuration",
+        "description": "After saving, copy each secret URL into the corresponding display's BetterDisplay event callback setting. Keep the event-hook placeholder exactly as shown; BetterDisplay substitutes the event name. Do not append display names or identifiers. Treat these URLs as credentials: do not publish, log or share them. They are not exposed as entity attributes or in diagnostics. Saving sends no request to the Mac.\n\n{urls}"
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach BetterDisplay. Check the Mac and HTTP server, then retry the manual scan.",
+      "invalid_auth": "The saved token was rejected. Reconfigure or reauthenticate this Mac.",
+      "invalid_input": "Check the selected families and saved connection settings.",
+      "invalid_response": "BetterDisplay returned an invalid or ambiguous response. Check app and server settings.",
+      "unsupported_control": "The requested discovery or control is unsupported by this server.",
+      "selection_required": "Explicitly choose All system displays, Individual targets or Mac-only.",
+      "no_selection": "Select at least one eligible target, or explicitly choose Mac-only with the Mac family enabled.",
+      "invalid_selection": "Choose each eligible target only once from this Mac's list.",
+      "invalid_mute_selection": "Manual mute-toggle targets must be selected system displays with the Audio family enabled.",
+      "mac_family_required": "Enable the Mac family in the rescan before choosing Mac-only.",
+      "internal_url_required": "Set Home Assistant's internal URL in network settings to an address reachable from this Mac, then retry. No event settings were changed."
+    }
+  },
+  "selector": {
+    "selection_mode": {"options": {"all": "All system displays found on this Mac", "selected": "Individual targets (including advanced types)", "mac_only": "Mac-only global controls (no displays)"}},
+    "families": {"options": {"basic": "Basic brightness and automatic brightness", "audio": "Volume and mute", "sensors": "Read-only display sensors", "power": "Hardware backlight (screen may go dark)", "input": "Input switching (may lose this Mac's image)", "modes": "Display modes, refresh rate and HiDPI", "image": "Color, contrast, gamma and gain", "hdr": "HDR and brightness upscaling", "connections": "Connect and disconnect displays", "virtual": "Advanced virtual-screen control", "groups": "Advanced display-group control", "layout": "Rotation, main display and layout actions", "cec": "CEC commands (physical effects are not acknowledged)", "mac": "Mac-wide appearance and Night Shift"}}
+  }
+}
